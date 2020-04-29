@@ -1,0 +1,202 @@
+---
+title: "Ch 6 Homework"
+author: "Darrious Barger"
+date: "4/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = "center", comment = NA, options(scipen=999))
+library(tidyverse)
+library(resampledata)
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(moderndive)
+library(gapminder)
+library(skimr)
+library(plotly)
+library(cowplot)
+library(lattice)
+library(readxl)
+library(ISLR)
+library(car)
+library(MASS)
+library(boot)
+```
+
+
+# Working with the College Data Set
+
+```{r}
+glimpse(College)
+```
+
+# Creating Training and Test Data Set
+
+I decided to use 544 points (70% of the data) for the training set and 233 points (30% of the data) for the test set.
+
+```{r}
+set.seed(1)
+train <- sample(777, 544)
+traindata <- College[train,]
+testdata <- College[-train,]
+```
+
+# Fitting a Linear Model
+
+
+Creating a linear model.
+
+```{r}
+l_model1 <- lm(Apps ~ ., College, subset = train)
+```
+
+
+```{r}
+mean((College$Apps - predict(l_model1, College))[train]^2)
+```
+
+The test error for the linear model is 1,101,527. Below we will test a few different models and see if the test error is better or worse.
+
+# Fitting a ridge regression model
+
+```{r}
+library(glmnet)
+```
+
+
+```{r}
+x = model.matrix(Apps ~., traindata)
+y = traindata$Apps
+```
+
+
+Below, we are setting up the lamba values that we will test. We are also using the `glmnet()` function to fit the ridge regression.
+
+```{r}
+set.seed(1)
+
+grid=10^seq(10,-2,length=100)
+ridge.mod=glmnet(x,y,alpha=0,lambda=grid)
+```
+
+
+This finds the value of lambda at the 50th iteration of the sequence
+```{r}
+ridge.mod$lambda[50]
+```
+
+
+```{r}
+coef(ridge.mod)[,50]
+```
+
+
+This will calculate the sum of squared betas in the ridge regression model.
+
+```{r}
+sqrt(sum(coef(ridge.mod)[-1,50]^2))
+```
+
+
+The predict function will give us the ridge regression coefficients for lamba = 50.
+
+```{r}
+predict(ridge.mod,s=50,type="coefficients")
+```
+
+We use cross Validation to find the best lamda.
+
+```{r}
+set.seed(1)
+train=sample(1:nrow(x), nrow(x)/2)
+test=(-train)
+y.test=y[test]
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=grid, thresh=1e-12)
+
+ridge.pred=predict(ridge.mod,s=4,newx=x[test,])
+mean((ridge.pred-y.test)^2)
+```
+
+The test error for the model is 1,950,042. This is larger than the standard regression model's test error. This means that in terms of test error, the ridge regression model is worse than the standard linear model.
+
+# Fitting Lasso Model
+
+Below we are implementing the lasso shrinkage method.
+
+```{r}
+set.seed(1)
+lasso.mod = glmnet(x[train,],y[train], alpha=1, lambda=grid)
+plot(lasso.mod)
+```
+
+```{r}
+set.seed(1)
+cv.out=cv.glmnet(x[train,],y[train],alpha=1)
+plot(cv.out)
+```
+
+```{r}
+bestlam=cv.out$lambda.min
+bestlam
+```
+
+```{r}
+set.seed(1)
+
+lasso.pred=predict(lasso.mod,s=bestlam,newx=x[test,])
+mean((lasso.pred-y.test)^2)
+```
+
+When we fit a lasso model, the test error is 1,955,120.
+
+# PCR Model
+
+```{r}
+library(pls)
+
+set.seed(1)
+
+pcr.fit = pcr(Apps ~ ., data = College, subset=train, scale=TRUE, validation="CV")
+#validationplot(pcr.fit,val.type="MSEP")
+
+```
+
+
+
+```{r}
+pcr.pred=predict(pcr.fit, newx = x[train,], ncomp=10)
+
+mean((pcr.pred-y.test)^2)
+```
+
+When fitting a PCR model, the test error is 31,806,891. This is much higher than any previous model.
+
+# PLS Model
+
+```{r}
+set.seed(1)
+
+pls.fit=plsr(Apps ~ ., data = College, subset=train, scale=TRUE, validation="CV")
+
+summary(pls.fit)
+```
+
+```{r}
+validationplot(pls.fit,val.type="MSEP")
+```
+
+```{r}
+pls.pred = predict(pls.fit, newx = x[train,], ncomp= 4)
+mean((pls.pred-y.test)^2)
+```
+
+When fitting a PLS model, we get a test error of 32,506,848. This is similar to the value we got for the PCR model.
+
+# Conclusion
+
+There was not a huge difference in test error between the linear regression model, the ridge regression model, and the lasso model. There was a large difference between these three and the PCR/PLS models.
+
+The PCR and PLS models should not be used for this data set as the linear regression and ridge regression model will provide more accurate predictions.
+
