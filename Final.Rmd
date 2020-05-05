@@ -1,0 +1,247 @@
+---
+title: "Final Project"
+author: "Connor Lawson - Darrious Barger"
+date: "5/4/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(resampledata)
+library(knitr)
+library(dplyr)
+library(skimr)
+library(utils)
+library(pls)
+library(ISLR)
+library(readxl)
+library(MASS)
+library(boot)
+library(caret)
+library(glmnet)
+library(leaps)
+```
+
+
+
+```{r, include = FALSE}
+housing <- read_excel("Housing.xlsx")
+```
+
+
+# Model from the previous project
+
+```{r}
+model1 = lm(price ~ garagesize + size + bedrooms + I(bedrooms^2), data = housing)
+summary(model1)
+```
+
+# Using regsubsets on all the data
+
+
+```{r}
+housing$elem <- as.numeric(c("edison" = 0, "adams" = 1, "parker" = 2, "edge" = 3, "harris" = 4, "crest" = 5)[housing$elem])
+housing$status <- as.numeric(c("sld" = 0, "pen" = 1, "act" = 2)[housing$status])
+```
+
+```{r}
+fow_sel <- regsubsets(price ~ ., data = housing, nvmax = 11, method = "forward")
+regSum <- summary(fow_sel)
+regSum
+```
+
+```{r}
+regSum$rsq
+regSum$adjr2
+regSum$cp
+regSum$bic
+```
+
+
+```{r}
+which.max(regSum$rsq)
+which.max(regSum$adjr2)
+which.min(regSum$cp)
+which.min(regSum$bic)
+```
+
+
+```{r}
+coef(fow_sel,7)
+```
+
+
+```{r}
+model2 <- lm(price ~ id + size + bath + bedrooms + agestandardized + status + elem, data = housing)
+summary(model2)
+```
+
+# Creating training and test data
+
+```{r}
+set.seed(123)
+half <- sample(nrow(housing), nrow(housing) * 0.5, replace = FALSE)
+train <- housing[half, ]
+test <- housing[-half, ]
+```
+
+# Using regsubsets on the training data
+
+```{r}
+test.mat <- model.matrix(price ~ ., data = test)
+```
+
+```{r}
+regfit.best <- regsubsets(price ~ ., data = train, nvmax = 11, method = "forward")
+```
+
+
+
+```{r}
+val.errors <- rep(NA, 11)
+```
+
+```{r}
+for (i in 1:9) 
+{
+  coefi=coef(regfit.best,id=i)
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i] <- mean((test$price-pred)^2)
+}
+val.errors
+```
+
+```{r}
+which.min(val.errors)
+```
+
+```{r}
+regfit.best2 <- regsubsets(price ~ ., data = train, nvmax = 4, method = "forward")
+summary(regfit.best2)
+```
+
+A model using 5 predictors will be the best.
+
+```{r}
+model3 <- lm(price ~ size + bedrooms + elem + lot + garagesize, data = housing )
+summary(model3)
+```
+
+
+# Using Ridge Regression
+
+
+```{r}
+set.seed(123)
+
+x=model.matrix(price ~ ., data = train)[,-1]
+y=train$price
+```
+
+
+Below, we are setting up the lamba values that we will test. We are also using the `glmnet()` function to fit the ridge regression.
+
+```{r}
+set.seed(123)
+
+grid=10^seq(10,-2,length=100)
+ridge.mod=glmnet(x,y,alpha=0,lambda=grid)
+```
+
+
+This finds the value of lambda at the 50th iteration of the sequence
+
+```{r}
+ridge.mod$lambda[50]
+```
+
+
+```{r}
+coef(ridge.mod)[,50]
+```
+
+
+This will calculate the sum of squared betas in the ridge regression model.
+
+```{r}
+sqrt(sum(coef(ridge.mod)[-1,50]^2))
+```
+
+
+The predict function will give us the ridge regression coefficients for lamba = 50.
+
+```{r}
+predict(ridge.mod,s=50,type="coefficients")
+```
+
+We use cross Validation to find the best lamda.
+
+```{r}
+set.seed(1)
+train=sample(1:nrow(x), nrow(x)/2)
+test=(-train)
+y.test=y[test]
+ridge.mod=glmnet(x[train,],y[train],alpha=0,lambda=grid, thresh=1e-12)
+
+ridge.pred=predict(ridge.mod,s=4,newx=x[test,])
+```
+
+
+# Partial Least Squares
+
+```{r}
+set.seed(123)
+
+pls.fit=plsr(price ~ .,data = housing, subset = train, scale=TRUE, validation="CV")
+
+summary(pls.fit)
+```
+
+```{r}
+validationplot(pls.fit,val.type="MSEP")
+```
+
+Looking at the graph, we will choose a 1 component model since the graph is growing larger and we would like to minimize the error.
+
+
+```{r}
+pls.pred = predict(pls.fit, newx = x[train,], ncomp = 1)
+pls.fit = plsr(price ~ ., data = housing,scale=TRUE,ncomp = 1)
+```
+
+# Calculate the MSE
+
+MSE For model 1
+
+```{r}
+mean((housing$price - predict(model1, housing))^2)
+```
+
+MSE for model 2
+
+```{r}
+mean((housing$price - predict(model2, housing))^2)
+```
+
+MSE for model 3
+
+
+```{r}
+mean((housing$price - predict(model3, housing))^2)
+```
+
+
+MSE for model 4
+
+```{r}
+mean((ridge.pred-y.test)^2)
+```
+
+
+MSE for model 5
+
+```{r}
+mean((pls.pred-y.test)^2)
+```
+
